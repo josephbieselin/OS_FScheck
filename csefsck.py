@@ -33,7 +33,9 @@ def get_file_content(filepath):
 
 # return a list containing all free block numbers in the free block files
 def get_freeblock_list():
+    # freeblock_list will contain ints that are the free blocks in the filesystem
     freeblock_list = []
+    
     # loop through each file appending to the free block list
     for i in range(FREE_START, FREE_END + 1):
         # open the free block file and store its contents
@@ -41,17 +43,29 @@ def get_freeblock_list():
         block = open(block_path, 'r+')
         contents = block.read()
         contents = contents.strip() # strip any whitespace
+        # add comma and zeros to fill up the block size, and truncate it to the block size
+        contents += ','
+        contents = contents.ljust(BLOCK_SIZE, '0')
+        contents = contents[0:BLOCK_SIZE]
         # break contents into a list separted by commas
         file_list = contents.split(',')
+        
         # add each noted free block in the file to freeblock_list
-        for num in file_list:
-            num = num.strip() # strip any whitespace
-            num = int(num) # un-stringify
-            freeblock_list.append(num) # append this number to the list
+        for i in range(0, len(file_list) - 1): # len - 1 because the last element will be the appended 0's
+            freeblock_list.append(int(file_list[i].strip()))
         # close the file
         block.close()
     
     return freeblock_list
+
+# return a list containing all possible free blocks that could exist, i.e. ROOT + 1 --> MAX_NUM_BLOCKS    
+def get_possible_freeblocks():
+    # listy will contain all integers that could be free blocks
+    listy = []
+    # loop through the possible range of ints
+    for i in range(ROOT + 1, MAX_NUM_BLOCKS):
+        listy.append(i)
+    return listy
 
 # ---------------------------------- 1 ----------------------------------------#
 # Returns a boolean based on the check if the device ID that is stored in the superblock, aka fusedata.0, is the correct ID
@@ -255,15 +269,17 @@ def check_times():
     check_entry_times(time_since_epoch, 'd', ROOT)
 # ---------------------------------- 2 ----------------------------------------#
 
-# ---------------------------------- 3 ----------------------------------------#
-
+def check_dirs():
 
 
 
 def main():
     check_devId()
     check_superblock(int(time()))
+    check_dirs()
     check_times()
+
+    
     
 if __name__ == "__main__":
     main()
