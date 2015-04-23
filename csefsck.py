@@ -31,6 +31,28 @@ def get_file_content(filepath):
     the_file.close()
     return content
 
+# return a list containing all free block numbers in the free block files
+def get_freeblock_list():
+    freeblock_list = []
+    # loop through each file appending to the free block list
+    for i in range(FREE_START, FREE_END + 1):
+        # open the free block file and store its contents
+        block_path = "%s/fusedata.%d" % (FILES_DIR, i)
+        block = open(block_path, 'r+')
+        contents = block.read()
+        contents = contents.strip() # strip any whitespace
+        # break contents into a list separted by commas
+        file_list = contents.split(',')
+        # add each noted free block in the file to freeblock_list
+        for num in file_list:
+            num = num.strip() # strip any whitespace
+            num = int(num) # un-stringify
+            freeblock_list.append(num) # append this number to the list
+        # close the file
+        block.close()
+    
+    return freeblock_list
+
 # ---------------------------------- 1 ----------------------------------------#
 # Returns a boolean based on the check if the device ID that is stored in the superblock, aka fusedata.0, is the correct ID
 def check_devId():
@@ -61,7 +83,6 @@ def check_devId():
 # ---------------------------------- 1 ----------------------------------------#
 
 # ---------------------------------- 2 ----------------------------------------#
-
 # check and possibly update the superblock's creationTime
 def check_superblock_time(t, file_list):
     # break the creationTime part into a 2 component list
@@ -231,12 +252,17 @@ def check_entry_times(t, entry_type, num):
 
 def check_times():
     time_since_epoch = int(time())
-    check_superblock(time_since_epoch)
-    #check_entry_times(time_since_epoch, 'd', ROOT)
+    check_entry_times(time_since_epoch, 'd', ROOT)
 # ---------------------------------- 2 ----------------------------------------#
+
+# ---------------------------------- 3 ----------------------------------------#
+
+
+
 
 def main():
     check_devId()
+    check_superblock(int(time()))
     check_times()
     
 if __name__ == "__main__":
