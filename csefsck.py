@@ -45,15 +45,11 @@ def get_freeblock_list():
         block = open(block_path, 'r+')
         contents = block.read()
         contents = contents.strip() # strip any whitespace
-        # add comma and zeros to fill up the block size, and truncate it to the block size
-        contents += ','
-        contents = contents.ljust(BLOCK_SIZE, '0')
-        contents = contents[0:BLOCK_SIZE]
         # break contents into a list separted by commas
         file_list = contents.split(',')
         
         # add each noted free block in the file to freeblock_list
-        for i in range(0, len(file_list) - 1): # len - 1 because the last element will be the appended 0's
+        for i in range(0, len(file_list)):
             freeblock_list.append(int(file_list[i].strip()))
         # close the file
         block.close()
@@ -89,9 +85,7 @@ def check_devId():
     if (DEV_ID != test_devId_num):
         print "Device ID did not match the expected value... awkward\n"
         exit(1)
-    
-    # pad the file's contents with 0's
-    contents = contents.ljust(BLOCK_SIZE, '0')
+
     # write the contents back to the file
     superblock.seek(0)
     superblock.write(contents)
@@ -164,12 +158,10 @@ def check_superblock(t):
     check_superblock_block_data(t, file_list)
     # get the superblock content back into string format
     contents = ','.join(file_list)
-    
-    # pad the file's contents with 0's
-    contents = contents.ljust(BLOCK_SIZE, '0')
+
     superblock.seek(0)
     superblock.write(contents)
-    superblock.truncate(BLOCK_SIZE) # truncate the file, assuming data inside will not exceed 4096 bytes
+    # superblock.truncate(BLOCK_SIZE) # truncate the file, assuming data inside will not exceed 4096 bytes
     superblock.close()
 
 '''
@@ -184,14 +176,19 @@ def check_entry_times(t, entry_type, num):
     block = open(block_path, 'r+')
     contents = block.read()
     contents = contents.strip() # strip any whitespace
+    
     # break contents into a list separated by commas
     file_list = contents.split(',')
     
     if (entry_type == 'f'):
+        if (contents.count('{') != 1 and contents.count('}') != 1):
+            print "Corrupt data in fusedata.%d: it does not contain inode data. check_entry_times cannot proceed.\n" % num
         file_list_atime_index = 5
         file_list_ctime_index = 6
         file_list_mtime_index = 7
     else:
+        if (contents.count('{') != 2 and contents.count('}') != 2):
+            print "Corrupt data in fusedata.%d: it does not contain directory data. check_entry_times cannot proceed.\n" % num
         file_list_atime_index = 4
         file_list_ctime_index = 5
         file_list_mtime_index = 6
@@ -243,8 +240,6 @@ def check_entry_times(t, entry_type, num):
     if (changed):
         contents = ','.join(file_list)
     
-    # pad the file's contents with 0's
-    contents = contents.ljust(BLOCK_SIZE, '0')
     block.seek(0)
     block.write(contents)
     block.close()
@@ -304,6 +299,45 @@ def check_permissions(file_list, entry_type):
     # rejoin the possibly newly updated content back into the passed in file_list list
     file_list[1] = ','.join(permis_list)
 
+# checks if the linkcount is correct, if indirect is set correctly, and if the size is a value that makes sense with respect to blocksize and indirect
+def check_file_inode(my_num, blocks_in_use):
+    # read the contents of the fusedata block into the variable: contents
+    block_path = FILES_DIR + "/fusedata." + str(my_num)
+    block = open(block_path, 'r+')
+    contents = block.read()
+    # print an error message and stop checking the inode if the data in the block does not match the format expected
+    if (contents.count('{') != 1 and contents.count('}') != 1):
+        print "Inode metadata in fusedata.%d has been corrupted and does match the expected format. Exitting check of this inode.\n"
+        return -1
+    contents = contents.strip() # strip any whitespace
+    file_list = contents.strip(',')
+    check_permissions(file_list, 'f')
+    
+    # get the size
+    size_data = file_list[0]
+    size_list = size_data.split(':')
+    size_str = size_list[1].strip()
+    size_num = int(size_str)    
+    # get the linkcount
+    linkcount_data = file_list[4]
+    linkcount_list = linkcount_data.split(':')
+    linkcount_str = linkcount_list[1].strip()
+    linkcount_num = int(linkcount_str)
+    # get the indirect value
+    indirect_data = file_list[8]
+    indirect_list = indirect_data.split(':')
+    indirect_str = indirect_list[1].strip()
+    indirect_num = int(indirect_str)    
+    # get the location
+    location_data = file_list[9]
+    location_data = location_data.rstrip('}')
+    location_list = location_data.split(':')
+    location_str = location_list[1].strip()
+    location_num = int(location_str)
+    
+    
+    
+        
 # return the number of entries in the directory, resolve any issues with '.' and '..', and check all dir and inode entries in the directory
 def check_inode_dict(file_list, my_num, parent_num, blocks_in_use):
     org_entry_list = file_list[2].split('}')
@@ -320,12 +354,45 @@ def check_inode_dict(file_list, my_num, parent_num, blocks_in_use):
     found_dot = False # boolean to indicate whether the inode_dict contains '.' or not
     found_dotdot = False # boolean to indicate whether the inode_dict contains '..' or not
     for entry in temp_list:
-        if (entry[1] == '.'):
-            found_dot = True
-            if (int(entry[2]) != my_num):
-                
+        if (entry[0] == 'd'):
+            # if the '.' or '..' numbers don't match the passed in values, assume the passed in block numbers from the parent directory are the correct values
+            if (entry[1] == '.'):
+                found_dot = True
+                if (int(entry[2]) != my_num):
+                    entry[2] = my_num
+            elif (entry[1] == '..'):
+                found_dotdot = True
+                if (int(entry[2]) != my_num):
+                    entry[2] = my_num
+            else:
+                # the entry is a sub-directory, so we must check its inode_dict; its number is the entry's number, its parent number is the current directory's number
+                check_dir(entry[2], my_num, blocks_in_use)
+                # since this is a sub-directory, we must add its block number to the list of block numbers in use
+                blocks_in_use.append(my_num)
+        else: # entry[0] == 'f'
+            # add the file inode to the list of used blocks
+            blocks_in_use.append(entry[2])
+            check_file_inode(entry[2], blocks_in_use)
 
-
+    # if '.' or '..' weren't found in the inode_dict, add them to temp_list which will be converted back into the block's file
+    if (not found_dot):
+        temp_list.append(['d', '.', str(my_num)])
+    if (not found_dotdot):
+        temp_list.append(['d', '..', str(parent_num)])
+    
+    listy = []
+    for entry in temp_list:
+        # temp holds a string that is the format of an entry in a directory
+        temp = ':'.join(entry)
+        # listy will hold all the entries as indexes
+        listy.append(temp)
+    # rejoin all the entries separated by a comma and space
+    org_entry_list[0] = ', '.join(listy)
+    # rejoin the file's contents to include a curly brace
+    file_list[2] = '}'.join(org_entry_list)
+    
+    # return the number of entries in the inode_dict for this directory
+    return len(listy)
 
 
 # checks the data inside the directory stored at fusedata block number referenced by my_num
@@ -343,6 +410,17 @@ def check_dir(my_num, parent_num, blocks_in_use):
     file_list = contents.split('{') # index zero will contain an empty string because directory data starts with a '{'
     check_permissions(file_list, 'd') # update directory id's and mode if necessary
     linkcount = check_inode_dict(file_list, my_num, parent_num, blocks_in_use)
+    # file_meta_data holds size, uid, ..., linkcount, filename_to_inode_dict
+    file_meta_data = file_list[1].split(',') # linkcount is index 7
+    linkcount_data = file_meta_data[7]
+    linkcount_list = linkcount_data.split(':')
+    linkcount_str = linkcount_list[1].strip()
+    # replace the old link count with a possibly updated new one
+    file_meta_data[7] = file_meta_data[7].replace(linkcount_str, str(linkcount))
+    file_list[1] = ','.join(file_meta_data)
+    contents = '{'.join(file_list)
+    
+    
     
 
 
