@@ -13,8 +13,10 @@ ROOT	         = FREE_END + 1
 BLOCKS_IN_FREE	 = 400
 UID		 = 1
 GID		 = 1
+INODE_MODE       = 33261
 DIR_UID		 = 1000
 DIR_GID		 = 1000
+DIR_MODE         = 16877
 
 FILES_DIR	 = "/fusedata"
 LOG_FILE	 = "~/Desktop/log.txt"
@@ -269,14 +271,86 @@ def check_times():
     check_entry_times(time_since_epoch, 'd', ROOT)
 # ---------------------------------- 2 ----------------------------------------#
 
-def check_dirs():
 
+# update directory/inode uid, gid, and mode if the values are incorrect; file_list is the block data, entry_type is a char representing a directory 'd' or an inode 'f'
+def check_permissions(file_list, entry_type):
+    if (entry_type == 'd'):
+        uid_val = DIR_UID
+        gid_val = DIR_GID
+        mode_val = DIR_MODE
+    else: # entry_type == 'f'
+        uid_val = UID
+        gid_val = GID
+        mode_val = INODE_MODE
+        
+    # permis_list index:entry_data --> 0:size, 1:uid, 2:gid, 3:mode, 4:atime, etc...
+    permis_list = file_list[1].split(',')
+    for i in range(1, 4): # check and update (if needed) the uid, gid, and mode
+        data = permis_list[i].split(':') # get the number for the uid/gid/mode
+        data_str = data[1].strip() # strip any whitespace
+        data_num = int(data_str) # get the data as an int
+        
+        # update the uid, gid, mode values if necessary replacing the old value that used to be there
+        if (i == 1): # uid
+            if (data_num != uid_val):
+                permis_list[i] = permis_list[i].replace(data_str, str(uid_val))
+        elif (i == 2): # gid
+            if (data_num != gid_val):
+                permis_list[i] = permis_list[i].replace(data_str, str(gid_val))
+        else: # mode
+            if (data_num != mode_val):
+                permis_list[i] = permis_list[i].replace(data_str, str(mode_val))
+    
+    # rejoin the possibly newly updated content back into the passed in file_list list
+    file_list[1] = ','.join(permis_list)
+
+# return the number of entries in the directory, resolve any issues with '.' and '..', and check all dir and inode entries in the directory
+def check_inode_dict(file_list, my_num, parent_num, blocks_in_use):
+    org_entry_list = file_list[2].split('}')
+    # now the entry_list is actually a list with each directory entry
+    entry_list = org_entry_list[0].split(',')
+    temp_list = []
+    for i in range(0, len(entry_list)):
+        # listy contains a string of format: "type:name:block_number"
+        listy = entry_list[i].strip()
+        # listy is now a list with 3 strings in 3 indexes
+        listy = listy.split(':')
+        temp_list.append(listy)
+    # temp_list's indexes each contain a list that has 3 index values: 0 --> type, 1 --> name, 2 --> block_number
+    found_dot = False # boolean to indicate whether the inode_dict contains '.' or not
+    found_dotdot = False # boolean to indicate whether the inode_dict contains '..' or not
+    for entry in temp_list:
+        if (entry[1] == '.'):
+            found_dot = True
+            if (int(entry[2]) != my_num):
+                
+
+
+
+
+# checks the data inside the directory stored at fusedata block number referenced by my_num
+def check_dir(my_num, parent_num, blocks_in_use):
+    # read the contents of the fusedata block into the variable: contents
+    block_path = FILES_DIR + "/fusedata." + str(my_num)
+    block = open(block_path, 'r+')
+    contents = block.read()
+    # print an error message and stop checking the directory if the data in the block does not match the format expected
+    if (contents.count('{') != 2 and contents.count('}') != 2):
+        print "Directory metadata in fusedata.%d has been corrupted and does match the expected format. Exitting check of this directory.\n"
+        return -1
+    contents = contents.strip() # strip any whitespace
+    # break contents into a list separated by curly braces '{' and '}'
+    file_list = contents.split('{') # index zero will contain an empty string because directory data starts with a '{'
+    check_permissions(file_list, 'd') # update directory id's and mode if necessary
+    linkcount = check_inode_dict(file_list, my_num, parent_num, blocks_in_use)
+    
 
 
 def main():
     check_devId()
     check_superblock(int(time()))
-    check_dirs()
+    blocks_in_use = []
+    check_dir(ROOT, ROOT, blocks_in_use)
     check_times()
 
     

@@ -1,7 +1,9 @@
 def change_list(listy):
-    j = 0
-    for j in range(len(listy)):
-        listy[j] += "%d" % j
+    listy.append('bieselin')
+    
+    #j = 0
+    #for j in range(len(listy)):
+    #    listy[j] += "%d" % j
     '''    
     for i in listy:
         print i + '\n'
